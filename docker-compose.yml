@@ -1,0 +1,15 @@
+services:
+  gopay-plus:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8800:8800"
+      # Uncomment when pairing or debugging the WhatsApp relay.
+      # - "50056:50056"
+    volumes:
+      - ./config.json:/app/config.json:ro
+    environment:
+      START_WHATSAPP: ${START_WHATSAPP:-false}
+      WA_PAIRING_PHONE: ${WA_PAIRING_PHONE:-}
+      WA_PROXY_URL: ${WA_PROXY_URL:-}
+      WA_GRPC_PORT: ${WA_GRPC_PORT:-50056}
