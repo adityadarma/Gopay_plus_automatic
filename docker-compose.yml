@@ -6,6 +6,7 @@ services:
       - "8800:8800"
     volumes:
       - ./config.json:/app/config.json:ro
+      - ./wa_session:/app/to_whatsapp/.baileys-session
     environment:
       START_WHATSAPP: ${START_WHATSAPP:-false}
       WA_PAIRING_PHONE: ${WA_PAIRING_PHONE:-}
