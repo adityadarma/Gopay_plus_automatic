@@ -265,6 +265,8 @@ class GoPayCharger:
             f"https://api.stripe.com/v1/payment_pages/{cs_id}/init",
             data=body, timeout=DEFAULT_TIMEOUT,
         )
+        if r.status_code != 200:
+            self.log(f"[gopay] _stripe_init 400 error body: {r.text}")
         r.raise_for_status()
         data = r.json() or {}
         pm_types = [pm for pm in data.get("payment_method_types", []) if isinstance(pm, str)]
