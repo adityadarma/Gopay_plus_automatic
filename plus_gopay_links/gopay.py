@@ -258,7 +258,6 @@ class GoPayCharger:
             "elements_session_client[stripe_js_id]": str(uuid.uuid4()),
             "elements_session_client[locale]": "en",
             "elements_session_client[is_aggregation_expected]": "false",
-            "elements_options_client[stripe_js_locale]": "auto",
             "key": stripe_pk,
         }
         r = self.ext.post(
@@ -405,7 +404,6 @@ class GoPayCharger:
             "elements_session_client[stripe_js_id]": js_id,
             "elements_session_client[locale]": "en",
             "elements_session_client[is_aggregation_expected]": "false",
-            "elements_options_client[stripe_js_locale]": "auto",
             "elements_options_client[saved_payment_method][enable_save]": "never",
             "elements_options_client[saved_payment_method][enable_redisplay]": "never",
             "key": stripe_pk,
