@@ -307,9 +307,9 @@ class GoPayCharger:
             f"?returned_from_redirect=true&ui_mode=custom&return_url={quote(chatgpt_return, safe='')}"
         )
         body = {
-            "guid": uuid.uuid4().hex,
-            "muid": uuid.uuid4().hex,
-            "sid": uuid.uuid4().hex,
+            "guid": self.runtime.get("guid") or uuid.uuid4().hex,
+            "muid": self.runtime.get("muid") or uuid.uuid4().hex,
+            "sid": self.runtime.get("sid") or uuid.uuid4().hex,
             "payment_method": pm_id,
             "init_checksum": init_checksum,
             "version": self.runtime.get("version") or "fed52f3bc6",

@@ -1,4 +1,12 @@
 {
+  "runtime": {
+    "guid": "NILAI_GUID_DARI_BROWSER",
+    "muid": "NILAI_MUID_DARI_BROWSER",
+    "sid": "NILAI_SID_DARI_BROWSER",
+    "js_checksum": "qto~d^n0=QU>a<eRUrbu]]db<|ePd&m_]}q`U|_OeZX=e&owM{`No?U^`w",
+    "rv_timestamp": "qto>n<Q=U&CyY&`>X^r<YNr<YN`<Y_C<Y_C<Y^`zY_`<Y^n{U>o&U&CyexL<dRn#Yb\\%Yx]yXRQyXu\\>X&ard_eyY=QvX_;=XbL&X&MxX=exYNn{U>e&U&Cydbexexn#XRP&dbn$XuYrXOUxd_L%Y=eyY_PCX_#=[RnDd&Mrdbd&d=eve&X=dbQsdOUrX_n%e=X&e&\\DX_L<e%o?U^`w",
+    "version": "ce0eb50a73"
+  },
   "gopay": {
     "country_code": "62",
     "phone_number": "default phone number without country code",
