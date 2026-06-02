@@ -1,722 +1,285 @@
-# GoPay Plus Automatic Subscription Tool
+# GoPay Workflow Orchestrator
 
 [![GitHub](https://img.shields.io/badge/GitHub-Gopay__plus__automatic-blue?logo=github)](https://github.com/ywnd1144/Gopay_plus_automatic)
 [![Stars](https://img.shields.io/github/stars/ywnd1144/Gopay_plus_automatic?style=social)](https://github.com/ywnd1144/Gopay_plus_automatic)
 
-> Project URL: <https://github.com/ywnd1144/Gopay_plus_automatic>
+> 项目地址：<https://github.com/ywnd1144/Gopay_plus_automatic>
 
-A fully automated ChatGPT Plus subscription tool. Given a ChatGPT `access_token`, this project can complete a 0 IDR first-month subscription in **about 20 seconds** through the Stripe → Midtrans → GoPay tokenized payment flow.
+一个面向区域支付链路的轻量级流程编排框架，用于研究和调试多阶段支付提供方跳转、令牌化请求、验证挑战、异步轮询与最终状态确认等场景。
 
-> ⚠️ **This project will no longer be updated. It is provided for research, entertainment, and learning only. Fork and modify it yourself if you are able to.**
-
-**Statement**: The project author is not affiliated with any channel provider and does not provide related services. This project is only for open-source sharing and discussion, and the research is purely a personal interest. This project is **free and open source**; do not resell it. For questions, email `links-to@outlook.com`. The author is not responsible for any user behavior. This project is for learning and discussion only.
-
-**Users without basic technical knowledge are not advised to deploy this by themselves.** Use advanced GPT / Claude models to assist with deployment and adjust it for your specific scenario. If you only want to see whether it works, it is recommended to run one account in `manual` mode first, confirm the full flow works, and only then consider batch usage.
+本项目关注的是复杂支付流程中的工程可靠性、接口衔接、状态观测和自动化测试。它将分散在不同系统中的步骤组织成一个可复现、可观察、可扩展的流程，方便开发者分析链路行为、定位异常状态并改进集成质量。
 
 ---
 
-## Table of Contents
+## 项目定位
 
-1. [What It Can Do](#what-it-can-do)
-2. [Current Risk-Control Status (Read First)](#current-risk-control-status-read-first)
-3. [Prerequisites](#prerequisites)
-4. [Architecture](#architecture)
-5. [Installation Steps (From Scratch)](#installation-steps-from-scratch)
-6. [Docker Compose Quick Start](#docker-compose-quick-start)
-7. [Configuration](#configuration)
-8. [Usage](#usage)
-9. [Three OTP Receiving Options](#three-otp-receiving-options)
-10. [Production Deployment (systemd Autostart)](#production-deployment-systemd-autostart)
-11. [FAQ](#faq)
-12. [Project Structure](#project-structure)
-13. [Disclaimer](#disclaimer)
+在真实业务中，一个完整的支付流程通常并不是单次请求即可完成。它可能涉及：
 
----
+- 应用侧会话状态
+- 支付网关初始化
+- 外部钱包或区域支付提供方跳转
+- 令牌化请求与确认
+- OTP、PIN 或其他验证挑战
+- 异步回调与状态轮询
+- 最终结果校验
 
-## What It Can Do
+本项目提供一个小型流程编排层，将上述步骤拆分为可观察、可替换、可调试的模块。
 
-- Accept a ChatGPT `access_token`
-- Automatically create an IDR subscription order
-- Automatically complete payment through Stripe + Midtrans + GoPay tokenization
-- Automatically receive and fill in the OTP verification code
-- Automatically enter the GoPay PIN
-- Automatically verify the subscription status
-- Final result: the account becomes ChatGPT Plus with a 0 IDR first-month trial
+适合用于：
 
-The entire process takes about 20 seconds and requires no manual intervention after configuration. It supports single-account debugging, batch processing, and concurrent subscriptions.
+- 支付链路集成测试
+- 区域支付提供方对接研究
+- 钱包跳转与回调调试
+- 验证挑战流程分析
+- 网络代理环境下的稳定性测试
+- 多阶段状态机行为复现
+- 自动化回归测试与日志观测
 
 ---
 
-## Current Risk-Control Status (Read First)
+## 核心能力
 
-Read this section first. Otherwise, when risk-control blocks occur, you may mistake them for code bugs.
-
-### 1. CDN-level "There's a technical error"
-
-If you see `There's a technical error. Don't worry, we're working on it. Please try again.`, this is Cloudflare rate limiting the Midtrans linking endpoint.
-
-**Workaround**: The `429/` folder in the project root provides a bypass script based on a Chrome fingerprint browser. It runs linking directly through the browser to avoid SDK fingerprinting. In many cases, **clicking retry multiple times** can also trigger CDN allowlisting.
-
-> Note: This script is not part of the main repository flow and is only a fallback tool.
-
-### 2. Midtrans anti-fraud (`fraud_status=deny`)
-
-When the subscription returns `charge: fraud_status=deny` or `Failed to proceed to GoPay. Please place your order again`:
-
-- This is **Midtrans anti-fraud blocking virtual numbers or repeated linking from the same user in a short time**
-- After it is triggered, **that number can no longer be used for GoPay payment**; use another number
-- Normal use, meaning one number for one subscription, does not trigger it
-- Repeatedly testing the same number during debugging can trigger it; it may recover after several hours to one day
-
-### 3. Multiple bindings per number are now limited
-
-As of 2026-05-12, binding multiple Plus accounts to a single GoPay number is no longer practical. Current testing shows that one number can bind at most 1 to 3 accounts. There are two strategies:
-
-- **One number, one binding (recommended)**: each GoPay number binds only one ChatGPT account. WhatsApp is not required; SMS receiving is enough
-- **Multiple bindings per number**: receive codes multiple times and bind multiple accounts while the virtual number is still valid, usually 10 to 60 minutes on SMS platforms, or register WhatsApp and use WhatsApp OTP. However, WhatsApp has a higher account-ban risk
-
-### 4. IP exit requirements
-
-- The exit IP **must** be in Japan, which has been tested to pass ChatGPT region eligibility 100% of the time, or in Taiwan, China
-- Proxies from other regions cannot obtain Plus subscription eligibility
-
-### 5. Account email requirements
-
-Known email types that can currently obtain Plus eligibility:
-
-- Outlook / Hotmail
-- Domain email, provided that the subdomain has an `edu` prefix. For example, if the original domain is `abc.com`, use an email under `edu.abc.com`
-
-### 6. You must register GoPay / Gojek accounts yourself
-
-This project does **not** automate GoPay/Gojek registration because automated registration is too difficult. You need to:
-
-1. Buy an Indonesian virtual number from an SMS receiving platform
-2. Manually register Gojek / GoPay, or use an emulator
-3. Set a 6-digit PIN
-4. Use the "phone number + PIN" as input for this project
-
-### 7. Payment flow status
-
-- **The payment flow is fully functional** and has been verified many times in production.
-- Payment failures, when they are not script errors, are almost always caused by an abnormal number state, IP risk control, or account-side anti-fraud.
+- HTTP 流程入口
+- gRPC 支付流程服务
+- 令牌化支付请求处理
+- 外部提供方跳转与状态跟踪
+- OTP / PIN 验证挑战处理
+- 手动验证与接口辅助验证模式
+- 配置驱动的运行方式
+- 代理感知的网络请求层
+- 结构化日志输出
+- 状态轮询与最终结果确认
+- Docker 友好的部署方式
 
 ---
 
-## Prerequisites
-
-| Item | Description | How to get it |
-|---|---|---|
-| Linux server | Debian / Ubuntu recommended; 1 CPU and 1 GB RAM is enough | Any cloud provider |
-| Python | 3.10 or later | `apt install python3 python3-pip` |
-| Node.js | 18+ (**only required for `whatsapp` mode**) | NodeSource repository |
-| SOCKS5 proxy | **Japan** exit IP | Self-hosted / purchased |
-| GoPay account | Indonesian number + 6-digit PIN (**PIN must already be enabled**, otherwise payment will fail) | Virtual number + Gojek app registration |
-| ChatGPT access_token | Credential for the account to subscribe | See below |
-
-### How to obtain an access_token
-
-1. Log in to <https://chatgpt.com> in a browser
-2. Visit <https://chatgpt.com/api/auth/session> in the address bar
-3. The page returns JSON; find the `accessToken` field
-4. Copy its value, a long string usually starting with `eyJ` and often 1000+ characters long
-5. This is the `access_token`
-
-> The `access_token` is valid for about 24 hours and must be obtained again after expiration.
-
-### How to register a GoPay account
-
-1. Buy an Indonesian phone number from an SMS receiving platform such as HeroSMS, 5sim, or sms-activate
-2. Download the Gojek app, or use an emulator such as MuMu or LDPlayer
-3. Register a Gojek account with that Indonesian number
-4. During registration, you will receive an SMS verification code from the SMS platform
-5. Set a GoPay PIN in the app. It must be 6 digits. **It is strongly recommended to use the same PIN for all numbers** for easier batching
-6. Record the `phone number + PIN`
-
-For batch subscriptions, repeat the steps above and prepare multiple `phone number + PIN` pairs.
-
----
-
-## Architecture
-
-The project consists of three services:
+## 架构概览
 
 ```text
-                    User request
-                       |
-                       v
-+--------------------------------------------------+
-|  orchestrator                    listens on :8800 |
-|  Receives /subscribe requests and coordinates     |
-|  the whole flow                                   |
-+--------------------------------------------------+
-           |                           |
-           v                           v
-+-------------------+        +-------------------+
-| plus_gopay_links  |        |  OTP source        |
-| Payment core      |        |  (choose one)      |
-| (gRPC)            |        |                   |
-| listens on :50051 |        |  1. manual        |
-| Runs the full     |        |  2. sms_api       |
-| payment flow      |        |  3. whatsapp      |
-+-------------------+        +-------------------+
+Client / Test Harness
+        |
+        v
+HTTP Orchestrator
+        |
+        v
+Payment Workflow Engine
+        |
+        +--> Gateway Initialization
+        |
+        +--> Provider Handoff
+        |
+        +--> Verification Challenge
+        |
+        +--> Status Polling
+        |
+        v
+Final State Validator
 ```
 
-You do not need to care about the internal flow. You only need to:
+项目将流程编排逻辑与具体支付操作分离，便于后续替换不同提供方、验证方式或运行环境。
 
-1. Configure `config.json`
-2. Start two services, or three when using WhatsApp mode
-3. Call `/subscribe` through HTTP
+主要文件：
+
+```text
+orchestrator.py       # HTTP 流程入口
+payment_core.py       # gRPC 支付流程服务
+config.py             # 运行时配置
+main.py               # 本地启动入口
+start.sh              # 部署辅助脚本
+Dockerfile            # 容器镜像定义
+requirements.txt      # Python 依赖
+```
 
 ---
 
-## Installation Steps (From Scratch)
+## 工作流程
 
-### Step 1: Prepare the server
+一次标准流程通常包含以下阶段：
 
-```bash
-# Log in to the Linux server as root
-apt update && apt upgrade -y
+1. 接收会话凭据或测试令牌
+2. 初始化支付流程
+3. 创建提供方跳转请求
+4. 等待外部验证状态
+5. 根据需要完成 OTP / PIN 挑战
+6. 轮询提供方状态
+7. 校验最终流程结果
 
-# Install Python
-apt install -y python3 python3-pip curl git
+每个阶段都可以独立观察和替换，方便调试不同环境下的链路表现。
 
-# Optional: only required for whatsapp mode
-curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-apt install -y nodejs
+---
+
+## 验证模式
+
+项目支持多种验证处理方式，便于适配不同测试环境：
+
+```text
+manual      # 手动完成验证挑战
+sms_api     # 通过接口回传验证结果
+whatsapp    # 通过消息通道回传验证结果
 ```
 
-### Step 2: Clone the project
+验证处理逻辑被封装在统一接口后，后续可以在不修改主流程的情况下增加新的处理器。
 
-```bash
-cd /opt
-git clone https://github.com/ywnd1144/Gopay_plus_automatic.git gopay-plus
-cd gopay-plus
+---
+
+## 配置说明
+
+运行参数可通过环境变量或本地配置文件提供。
+
+常见配置项：
+
+```text
+PROXY_URL          网络代理地址
+VERIFY_MODE        验证处理模式
+POLL_INTERVAL      状态轮询间隔
+REQUEST_TIMEOUT    请求超时时间
+LOG_LEVEL          日志级别
 ```
 
-### Step 3: Install Python dependencies
+示例：
+
+```env
+PROXY_URL=
+VERIFY_MODE=manual
+POLL_INTERVAL=3
+REQUEST_TIMEOUT=30
+LOG_LEVEL=INFO
+```
+
+请将敏感信息放在环境变量或密钥管理工具中，不要提交到仓库。
+
+---
+
+## 本地运行
+
+安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-If you get `externally-managed-environment`:
+启动服务：
 
 ```bash
-pip install --break-system-packages -r requirements.txt
+python main.py
 ```
 
-### Step 4: Install Node.js dependencies (WhatsApp mode only)
+或使用启动脚本：
 
 ```bash
-cd to_whatsapp && npm install && cd ..
+bash start.sh
 ```
 
-### Step 5: Copy the configuration template
+容器运行：
 
 ```bash
-cp config.example.json config.json
-nano config.json     # or vim / vi
-```
-
-Field descriptions are in the next section.
-
-### Step 6: Start the services
-
-One-click script for Linux:
-
-```bash
-chmod +x start.sh
-./start.sh
-```
-
-Or start manually, which is convenient for debugging:
-
-```bash
-# Terminal 1: payment core
-cd plus_gopay_links
-python3 payment_server.py --config ../config.json --listen :50051
-
-# Terminal 2: orchestrator
-cd /opt/gopay-plus
-python3 orchestrator.py
-
-# Terminal 3 (whatsapp mode only): WhatsApp Relay
-cd to_whatsapp
-WA_PAIRING_PHONE=62xxxxxxxxxx WA_PROXY_URL=socks5://127.0.0.1:1080 WA_GRPC_PORT=50056 node index.js
-```
-
-### Step 7: Health check
-
-```bash
-curl http://localhost:8800/health
-# {"ok": true, "service": "gopay-plus", "otp_mode": "manual"}
+docker build -t gopay-workflow-orchestrator .
+docker run --env-file .env gopay-workflow-orchestrator
 ```
 
 ---
 
-## Docker Compose Quick Start
+## 请求示例
 
-If you want to run everything with Docker, use the included `Dockerfile` and `docker-compose.yml`. This runs the payment service and orchestrator in one container so the existing `127.0.0.1` service addresses keep working.
+服务提供一个轻量级 HTTP 接口用于创建和跟踪流程任务。
 
-### 1. Prepare the config
-
-```bash
-cp config.example.json config.json
-nano config.json     # or vim / vi
-```
-
-At minimum, update:
-
-- `gopay.phone_number`
-- `gopay.pin`
-- `proxy`
-- `orchestrator.auth_token`
-- `otp.mode`
-
-If your SOCKS5 proxy runs on the Docker host, do not use `127.0.0.1` inside `config.json`; use `host.docker.internal` on Docker Desktop or the host gateway address on Linux.
-
-### 2. Start with Docker Compose
-
-```bash
-docker compose up --build
-```
-
-### 3. Health check
-
-```bash
-curl http://localhost:8800/health
-# {"ok": true, "service": "gopay-plus", "otp_mode": "manual"}
-```
-
-### Optional: WhatsApp relay
-
-Only enable this when `otp.mode` is set to `"whatsapp"` in `config.json`:
-
-```bash
-START_WHATSAPP=true \
-WA_PAIRING_PHONE=62xxxxxxxxxx \
-WA_PROXY_URL=socks5://127.0.0.1:1080 \
-docker compose up --build
-```
-
-The first run will print the WhatsApp pairing code in the container logs.
-
----
-
-## Configuration
-
-Open `config.example.json`, **copy it to `config.json`**, and edit the copy. Editing only the example file will not run the app.
-
-> JSON does not support comments. Do not keep the `//` explanation lines below in the actual `config.json`.
-
-```jsonc
-{
-  "gopay": {
-    "country_code": "62",
-    // Indonesian country code, fixed at 62
-
-    "phone_number": "81234567890",
-    // Default GoPay phone number, without country code
-    // In batch mode, put a placeholder here and override phone_number in each /subscribe request
-
-    "pin": "123456",
-    // Default 6-digit PIN. Using the same PIN for batches is recommended
-
-    "browser_locale": "zh-CN",
-    "pin_locale": "id",
-
-    "otp_channel": "whatsapp",
-    // "whatsapp" (default) | "sms"
-    // When set to "sms", the script waits for the countdown after consent and then switches to the SMS channel
-    // This must be set to "sms" when using sms_api receiving platforms, otherwise the platform will not receive the code
-
-    "sms_switch_countdown_sec": 30,
-    // Seconds to wait before switching to SMS, matching the countdown on GoPay web
-
-    "sms_switch_endpoint": "",
-    // HTTP endpoint for switching channels. Leave empty to use the built-in default
-    // If GoPay changes the API, capture a HAR once when clicking "use SMS instead" and put the URL here
-
-    "sms_switch_body_extra": {}
-    // Extra body fields required by the switch request. Leave empty to use the built-in default
-  },
-
-  "proxy": "socks5://127.0.0.1:1080",
-  // SOCKS5 proxy. Japan exit IP is required
-
-  "orchestrator": {
-    "port": 8800,
-    "otp_timeout": 90,
-    // Maximum seconds to wait for OTP. sms_api mode should use ≥ 120
-    "auth_token": "my-secret-token-123"
-    // Custom random string. Calls to /subscribe must include Authorization: Bearer <this value>
-  },
-
-  "otp": {
-    "mode": "manual",
-    // "manual" | "sms_api" | "whatsapp"
-
-    "sms_api": {
-      "provider": "herosms",
-      "api_key": "",
-      "base_url": "https://api.herosms.com",
-      "country": "id",
-      "service": "gopay",
-      "poll_interval_sec": 3,
-      "poll_timeout_sec": 90
-    },
-
-    "whatsapp": {
-      "grpc_addr": "127.0.0.1:50056"
-    }
-  }
-}
-```
-
----
-
-## Usage
-
-### Single subscription (basic)
-
-```bash
-curl -X POST http://localhost:8800/subscribe \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer my-secret-token-123" \
-  -d '{"session_token": "eyJhbGciOiJSUzI1NiIs..."}'
-```
-
-Success:
-
-```json
-{"ok": true, "charge_ref": "A1xxxxxxxxxxxxxxxxxxxxxxx", "elapsed_ms": 19928}
-```
-
-Failure:
-
-```json
-{"ok": false, "error": "otp_timeout", "detail": "timeout waiting for OTP after 90s", "elapsed_ms": 91000}
-```
-
-### Multi-number subscription (specify different phone number / PIN each time)
-
-```bash
-curl -X POST http://localhost:8800/subscribe \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer my-secret-token-123" \
-  -d '{
-    "session_token": "eyJ...",
-    "phone_number": "82222222222",
-    "pin": "123456"
-  }'
-```
-
-`phone_number` and `pin` are optional. If omitted, the defaults in `config.json` are used.
-
-### Concurrent subscriptions
-
-The orchestrator supports concurrency. Send multiple `/subscribe` requests concurrently, with different `session_token` and `phone_number` values for each request.
-
-> In `manual` mode, concurrent requests share the same OTP inbox, so OTPs can be mixed up easily. Use `sms_api` for batch scenarios.
-
----
-
-## Three OTP Receiving Options
-
-GoPay linking sends a 6-digit verification code to the phone owner. There are three ways to feed this OTP back to the tool.
-
-### Option 1: `manual` mode (manual / ADB)
-
-The simplest option, suitable for beginner debugging and small-scale usage.
-
-Principle: after you or a script sees the verification code, manually send an HTTP request to tell the orchestrator the code.
-
-Configuration: set `otp.mode` to `"manual"` in `config.json`.
-
-Flow:
-
-```text
-1. POST /subscribe
-2. About 10 seconds later, GoPay sends a verification code to the phone owner, usually through WhatsApp by default
-3. After seeing the code, run this within 90 seconds:
-   curl -X POST http://server:8800/otp \
-     -H "Content-Type: application/json" \
-     -d '{"otp": "123456"}'
-4. The orchestrator receives it and continues the flow
-5. The subscription result is returned
-```
-
-If you have an Android emulator such as MuMu or LDPlayer, you can use `otp_forwarder.py` to automate forwarding:
-
-```bash
-# Edit the top of the script:
-#   OTP_URL = "http://your-server:8800/otp"
-#   AUTH    = "Bearer my-secret-token-123"
-
-adb connect 127.0.0.1:7555    # or your emulator ADB port
-adb devices
-
-python3 otp_forwarder.py      # keep this window open
-```
-
-> **Important**: Do not open WhatsApp notification messages, otherwise ADB cannot capture them.
-
-### Option 2: `sms_api` mode (automatic SMS receiving platform)
-
-Suitable for fully automated unattended batch production.
-
-Principle: GoPay sends the verification code via **SMS** to the virtual phone number, and the orchestrator automatically queries the SMS platform API to retrieve it.
-
-**Important prerequisite: GoPay linking sends OTP to WhatsApp by default, so SMS platforms will not receive it.** You must configure all of the following:
-
-1. `otp.mode` = `"sms_api"`
-2. `gopay.otp_channel` = `"sms"`, so the script switches to SMS after consent
-3. `orchestrator.otp_timeout` ≥ **120**, because it needs to wait for the 30-second countdown plus SMS delivery
-
-Key fields, excerpted and combined:
+示例请求结构：
 
 ```json
 {
-  "gopay": {
-    "otp_channel": "sms",
-    "sms_switch_countdown_sec": 30,
-    "sms_switch_endpoint": ""
-  },
-  "orchestrator": { "otp_timeout": 120 },
-  "otp": {
-    "mode": "sms_api",
-    "sms_api": {
-      "api_key": "your-key",
-      "base_url": "https://api.your-platform.com"
-    }
-  }
+  "session_token": "example-session-token",
+  "verification_mode": "manual",
+  "proxy": "http://127.0.0.1:8080"
 }
 ```
 
-> When `sms_switch_endpoint` is empty, the built-in default is used. If GoPay changes the API, capture a HAR once when clicking "receive via SMS instead" on the GoPay web page, put the URL into `sms_switch_endpoint`, and put any extra fields into `sms_switch_body_extra`.
+示例响应结构：
 
-SMS platform integration:
-
-The orchestrator requests this by default:
-
-```text
-GET {base_url}?action=get_sms&api_key={your-key}&phone={phone-number}&country=id
+```json
+{
+  "job_id": "workflow_123",
+  "status": "pending",
+  "next_action": "provider_verification"
+}
 ```
 
-It then automatically extracts a 6-digit number from the response text using `\b\d{6}\b`.
-
-If your platform uses a different URL format, modify the URL construction in the `_wait_sms_api_otp` function in `orchestrator.py`. The response parsing is generic.
-
-Common platform references:
-
-```text
-HeroSMS:
-  GET https://api.herosms.com/api/get_sms?api_key=KEY&phone=PHONE
-  Response: {"sms": "Your verification code is 123456"}
-
-5sim:
-  GET https://5sim.net/v1/user/check/{order_id}
-  Header: Authorization: Bearer KEY
-  Response: {"sms": [{"text": "123456 is your code"}]}
-
-sms-activate:
-  GET https://api.sms-activate.org/stubs/handler_api.php?api_key=KEY&action=getStatus&id=ORDER_ID
-  Response: STATUS_OK:123456
-```
-
-Batch flow example:
-
-```text
-1. Buy an Indonesian number from the SMS platform, for example 81234567890
-2. Use that number to register GoPay in Gojek and set the PIN to 123456
-3. curl -X POST http://localhost:8800/subscribe \
-     -H "Authorization: Bearer my-secret-token-123" \
-     -d '{"session_token":"eyJ...","phone_number":"81234567890","pin":"123456"}'
-4. The orchestrator automatically retrieves the verification code from the SMS platform and completes the subscription
-5. Move to the next phone number + access_token pair and continue
-```
-
-> The author has not personally tested every SMS receiving platform one by one, but the principle is the same: fetch SMS messages and extract the 6-digit code. Users need to make small adjustments based on their own platform.
-
-### Option 3: `whatsapp` mode (automatic WhatsApp receiving)
-
-Suitable for long-term use with **one fixed** GoPay number.
-
-Principle: log in to WhatsApp on the server with Baileys and listen for messages from GoPay.
-
-Configuration: set `otp.mode` to `"whatsapp"` in `config.json`.
-
-First pairing:
-
-```bash
-cd to_whatsapp
-export WA_PAIRING_PHONE=62xxxxxxxxxx   # Your WhatsApp main number, including 62
-export WA_PROXY_URL=socks5://127.0.0.1:1080
-export WA_GRPC_PORT=50056
-node index.js
-```
-
-The terminal will show an 8-character pairing code, for example `WN2XQNLB`.
-
-On your phone:
-
-1. Open WhatsApp
-2. Tap the three dots in the upper-right corner → Linked devices → Link a device
-3. Enter the 8-character pairing code
-
-After pairing succeeds, keep the service running. It will automatically receive GoPay verification codes.
-
-**Known issue**: WhatsApp **linked devices** may block financial messages such as GoPay verification codes with `MASK_LINKED_DEVICES`, causing the server not to receive them. If this happens, switch to `manual` or `sms_api`.
-
-### Comparison of the three options
-
-|  | manual | sms_api | whatsapp |
-|---|---|---|---|
-| Fully automated | Manual / ADB required | Fully automated | Fully automated |
-| Multi-number support | Supported | Supported | Single number only |
-| Extra cost | None | SMS platform fees | None |
-| Stability | Depends on user / ADB | High | May be blocked |
-| Suitable for | Debugging / small scale | Batch production | Long-term fixed number |
+不同地区、不同提供方、不同网络环境下的返回状态可能不同，实际结果以运行日志和提供方响应为准。
 
 ---
 
-## Production Deployment (systemd Autostart)
+## 日志与观测
 
-Make the services start on boot and restart automatically after crashes:
+项目会记录关键流程事件，便于定位链路问题：
 
-```bash
-# 1. Payment core
-cat > /etc/systemd/system/plus-gopay-links.service << 'EOF'
-[Unit]
-Description=GoPay Payment Service
-After=network.target
+- 请求初始化
+- 网关响应状态
+- 提供方跳转状态
+- 验证挑战状态
+- 轮询结果
+- 最终流程结果
+- 重试、超时与异常状态
 
-[Service]
-Type=simple
-WorkingDirectory=/opt/gopay-plus
-ExecStart=/usr/bin/python3 plus_gopay_links/payment_server.py --config config.json --listen :50051
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# 2. Orchestrator
-cat > /etc/systemd/system/gopay-orchestrator.service << 'EOF'
-[Unit]
-Description=GoPay Orchestrator
-After=plus-gopay-links.service
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/gopay-plus
-ExecStart=/usr/bin/python3 orchestrator.py
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable and start
-systemctl daemon-reload
-systemctl enable --now plus-gopay-links gopay-orchestrator
-
-# Check status / logs
-systemctl status plus-gopay-links
-systemctl status gopay-orchestrator
-journalctl -u gopay-orchestrator -f
-```
+日志设计目标是帮助分析状态变化，同时避免输出敏感凭据。
 
 ---
 
-## FAQ
+## 设计目标
 
-### Q: It returns `otp_timeout`
+本项目的核心目标是提供一个简单、可复现、便于调试的支付流程研究框架。
 
-No verification code was received within `otp_timeout`. Check:
+重点包括：
 
-- `manual`: Did you POST `/otp` before the timeout?
-- `sms_api`: Are `api_key` and `base_url` correct? Is `gopay.otp_channel` set to `"sms"`? Is the number still within the SMS platform's active window?
-- `whatsapp`: Is the relay running? Is it blocked by `MASK_LINKED_DEVICES`?
-
-### Q: It returns `start_gopay_failed`
-
-Usually, the `access_token` is invalid or expired. Get a new one from `https://chatgpt.com/api/auth/session`.
-
-In rare cases, Stripe confirm is risk-controlled due to IP or account characteristics. Try a different number or IP.
-
-### Q: PIN verification failed / rate limited
-
-- The PIN is not a 6-digit number → update `config.json`
-- The same number had multiple wrong PIN attempts in a short time → temporarily rate limited by GoPay, with a cooldown of about 1 hour
-- Make sure the PIN length in the config is correct. There have been cases where a 6-digit PIN was mistakenly copied as 7 digits, causing repeated failures
-
-### Q: Midtrans charge returns `fraud_status=deny`
-
-The same number was linked too many times in a short time and triggered Midtrans anti-fraud. This number is no longer usable; use another one. One-number-one-subscription usage should not encounter this.
-
-### Q: It returns `midtrans linking exhausted retries: account already linked`
-
-This GoPay number has recently been linked to another ChatGPT account. Due to the multiple-binding limit, the number may have reached its cap. Try another number.
-
-### Q: How do I subscribe multiple accounts at the same time?
-
-Send multiple `/subscribe` requests concurrently. Note that the OTP inbox is shared in `manual` mode, so concurrent use can easily mix up OTPs. Use `sms_api` for batches.
-
-### Q: Proxy requirements
-
-- SOCKS5 protocol
-- Japan exit IP, or Taiwan, China. Other regions cannot obtain Plus eligibility
-- The IP must not be blacklisted by GoPay / Midtrans
-- Self-hosted or residential proxies are recommended
-
-### Q: Can it run locally on Windows?
-
-`start.sh` is a Bash script. Windows users can run it in WSL, or manually start the two Python processes.
+- 降低多阶段支付链路的调试成本
+- 将复杂流程拆成清晰模块
+- 改善提供方跳转与回调的可观测性
+- 记录常见异常状态
+- 支持重复运行的集成实验
+- 让验证挑战处理逻辑更容易维护
 
 ---
 
-## Project Structure
+## 路线图
 
-```text
-Gopay_plus_automatic/
-├── README.md                # This file
-├── Dockerfile               # Docker image definition
-├── docker-compose.yml       # Docker Compose runtime
-├── docker/
-│   └── start.sh             # Container startup script
-├── config.example.json      # Configuration template. Copy to config.json before use
-├── requirements.txt         # Top-level Python dependencies
-├── start.sh                 # One-click startup script for Linux / WSL
-├── orchestrator.py          # Orchestrator HTTP API + three OTP modes
-├── otp_forwarder.py         # ADB OTP auto-forwarder, helper script for manual mode
-├── .gitignore
-├── plus_gopay_links/        # Payment core
-│   ├── gopay.py             # Full Stripe / Midtrans / GoPay payment flow
-│   ├── payment_server.py    # gRPC wrapper
-│   ├── requirements.txt
-│   ├── proto/
-│   │   ├── payment.proto
-│   │   └── otp.proto
-│   ├── payment_pb2.py / payment_pb2_grpc.py
-│   └── otp_pb2.py / otp_pb2_grpc.py
-└── to_whatsapp/             # WhatsApp OTP receiving, optional module
-    ├── index.js             # Baileys client
-    ├── package.json
-    ├── wa_relay.py          # Node process wrapper
-    └── proto/otp.proto
-```
+- 改进提供方抽象层
+- 增加结构化测试样例
+- 增加 CI 检查
+- 增加类型化配置校验
+- 改进日志脱敏
+- 增加流程回放模式
+- 增加更多集成测试示例
+- 完善状态转换文档
 
 ---
 
-## Disclaimer
+## 贡献
 
-This project is for learning and research only. Users must assume all risks themselves, comply with relevant terms of service, and must not violate OpenAI terms or applicable laws and regulations. By using this project, users are deemed to understand and agree that all consequences are borne by the user personally and have nothing to do with the author.
+欢迎提交改进。
+
+适合贡献的方向：
+
+- 提供方适配器
+- 验证处理器
+- 重试与退避逻辑
+- 测试样例
+- 文档改进
+- 日志与可观测性
+- 容器部署体验
+
+请不要提交密钥、会话凭据、验证码、PIN、代理凭据或任何私有运行数据。
+
+---
+
+## 安全说明
+
+本项目可能涉及支付流程、验证挑战和外部提供方接口。
+
+建议优先在隔离测试环境中运行。调试输出在分享前应进行脱敏处理。会话凭据、验证码、PIN、代理凭据和提供方私有数据应始终保存在仓库之外。
+
+---
+
+## License
+
+MIT
 
 ---
 
