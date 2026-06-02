@@ -4,10 +4,6 @@ services:
     restart: unless-stopped
     ports:
       - "8800:8800"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-      # Uncomment when pairing or debugging the WhatsApp relay.
-      # - "50056:50056"
     volumes:
       - ./config.json:/app/config.json:ro
     environment:

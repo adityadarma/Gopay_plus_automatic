@@ -268,6 +268,9 @@ async function boot() {
           code,
           phone_hint: redactPhone(PAIRING_PHONE),
         });
+        log('\n======================================');
+        log(`PAIRING CODE GENERATED: ${code}`);
+        log('======================================\n');
         log('pairing code generated; check state file');
       } catch (e) {
         writeState({ status: 'error', error: 'requestPairingCode failed: ' + e.message });
