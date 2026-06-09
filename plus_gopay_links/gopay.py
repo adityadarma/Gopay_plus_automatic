@@ -988,6 +988,64 @@ class GoPayCharger:
         self.log(f"[gopay] midtrans snap_token={snap_token}")
         return self._run_midtrans_and_gopay(snap_token, cs_id, stripe_pk)
 
+    @staticmethod
+    def _extract_cs_id_from_stripe_url(url: str) -> str:
+        """Ekstrak checkout session ID dari URL checkout.stripe.com/c/pay/cs_live_...
+        
+        Mendukung format:
+          - https://checkout.stripe.com/c/pay/cs_live_XXXX#fragment
+          - https://checkout.stripe.com/c/pay/cs_test_XXXX?query=...
+          - cs_live_XXXX atau cs_test_XXXX langsung (bare ID)
+        """
+        import re as _re
+        # Bare ID
+        bare = re.match(r"^(cs_(?:live|test)_[A-Za-z0-9]+)", url.strip())
+        if bare:
+            return bare.group(1)
+        # Dari URL path
+        m = _re.search(r"/c/pay/(cs_(?:live|test)_[A-Za-z0-9]+)", url)
+        if m:
+            return m.group(1)
+        return ""
+
+    def start_from_stripe_checkout_url(
+        self, stripe_checkout_url: str, stripe_pk: str = "",
+    ) -> dict:
+        """Mode semi-otomatis: user punya URL checkout.stripe.com/c/pay/cs_live_...
+        (misalnya hasil copy dari browser setelah ChatGPT redirect ke Stripe).
+        
+        Method ini:
+          1. Ekstrak cs_id dari URL
+          2. Approve checkout via ChatGPT (menggunakan session ChatGPT aktif)
+          3. Tunggu setup_intent.next_action → snap_token Midtrans
+          4. Lanjutkan Midtrans linking + OTP (segmented: kembalikan state)
+        
+        Gunakan ini bersama complete_after_otp untuk flow dua tahap (OTP terpisah).
+        Untuk flow satu tahap, gunakan run_from_stripe_checkout_url.
+        """
+        cs_id = self._extract_cs_id_from_stripe_url(stripe_checkout_url)
+        if not cs_id:
+            raise GoPayError(
+                f"stripe_checkout_url: tidak dapat mengekstrak cs_id dari URL: {stripe_checkout_url!r}"
+            )
+        self.log(f"[gopay] stripe checkout URL cs_id={cs_id}")
+        # Approve dulu via ChatGPT (diperlukan agar setup_intent terbentuk)
+        self._chatgpt_approve(cs_id)
+        # Tunggu redirect → snap_token
+        snap_token = self._follow_redirect_to_midtrans(cs_id, stripe_pk)
+        self.log(f"[gopay] midtrans snap_token={snap_token}")
+        return self.start_linking_until_otp(snap_token, cs_id, stripe_pk)
+
+    def run_from_stripe_checkout_url(
+        self, stripe_checkout_url: str, stripe_pk: str = "",
+    ) -> dict:
+        """Jalankan flow lengkap dari URL checkout.stripe.com/c/pay/cs_live_...
+        (satu tahap, OTP via otp_provider).
+        """
+        state = self.start_from_stripe_checkout_url(stripe_checkout_url, stripe_pk)
+        otp = self.otp_provider()
+        return self.complete_after_otp(state, otp)
+
     def start_until_otp(self, stripe_pk: str, billing: Optional[dict] = None) -> dict:
         """Run checkout/linking until GoPay has sent the WhatsApp OTP."""
         billing = billing or {}

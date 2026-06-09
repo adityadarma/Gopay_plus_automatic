@@ -376,7 +376,9 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length)) if length else {}
             token = body.get("session_token", "").strip()
-            if not token or len(token) < 100:
+            _is_stripe_url = token.startswith("https://checkout.stripe.com/") or token.startswith("CSURL:")
+            _is_snap = token.startswith("SNAP:")
+            if not token or (not _is_stripe_url and not _is_snap and len(token) < 100):
                 self._json(400, {"ok": False, "error": "bad_token"})
                 return
             # 可选参数：覆盖默认手机号和 PIN

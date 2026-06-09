@@ -26,6 +26,12 @@ from gopay import (
     _load_cfg,
 )
 
+_STRIPE_CHECKOUT_PREFIXES = (
+    "https://checkout.stripe.com/",
+    "http://checkout.stripe.com/",
+    "CSURL:",
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -178,7 +184,30 @@ class PaymentService(payment_pb2_grpc.PaymentServiceServicer):
             )
 
             logger.info("[payment] StartGoPay start")
-            state = charger.start_until_otp(stripe_pk=stripe_pk, billing=_billing_from_config(cfg))
+
+            _token_raw = request.session_token.strip()
+
+            if _token_raw.startswith("SNAP:"):
+                # ── Mode 1: Bypass Stripe, snap_token Midtrans langsung ──
+                snap_token = _token_raw[5:].strip()
+                logger.info("[payment] Bypassing Stripe, using manual snap_token=%s", snap_token)
+                state = charger.start_linking_until_otp(snap_token, cs_id="", stripe_pk=stripe_pk)
+
+            elif _token_raw.startswith("CSURL:") or any(
+                _token_raw.startswith(p) for p in (
+                    "https://checkout.stripe.com/",
+                    "http://checkout.stripe.com/",
+                )
+            ):
+                # ── Mode 2: URL checkout.stripe.com/c/pay/cs_live_... ──
+                stripe_url = _token_raw[len("CSURL:"):].strip() if _token_raw.startswith("CSURL:") else _token_raw
+                logger.info("[payment] Stripe checkout URL mode, extracting cs_id from URL")
+                state = charger.start_from_stripe_checkout_url(stripe_url, stripe_pk=stripe_pk)
+
+            else:
+                # ── Mode 3: Normal — buat checkout baru via ChatGPT session ──
+                state = charger.start_until_otp(stripe_pk=stripe_pk, billing=_billing_from_config(cfg))
+
             flow_id, expires_at = self._flows.put(charger, state)
             charger = None
             cs_session = None
